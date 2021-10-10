@@ -1,41 +1,41 @@
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 pub struct Sender<T> {
-    shared: Rc<RefCell<T>>,
+    shared: Arc<Mutex<T>>,
 }
 
 impl<T> Sender<T> {
-    pub fn new(shared: Rc<RefCell<T>>) -> Self {
+    pub fn new(shared: Arc<Mutex<T>>) -> Self {
         Self {
             shared,
         }
     }
 
     pub fn send(&self, t: T) -> Result<(), ()> {
-        *self.shared.borrow_mut() = t;
+        *self.shared.lock().unwrap() = t;
         Ok(())
     }
 }
 
 pub struct Receiver<T> {
-    shared: Rc<RefCell<T>>,
+    shared: Arc<Mutex<T>>,
 }
 
 impl<T> Receiver<T> {
-    pub fn new(shared: Rc<RefCell<T>>) -> Self {
+    pub fn new(shared: Arc<Mutex<T>>) -> Self {
         Self {
             shared,
         }
     }
 
     pub fn recv(&self) -> Result<T, ()> {
-        Ok(self.shared.replace(unsafe { std::mem::zeroed() }))
+        Ok(std::mem::replace(&mut self.shared.lock().unwrap(), unsafe { std::mem::zeroed() }))
     }
 }
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let shared = Rc::new(RefCell::new(unsafe { std::mem::zeroed() }));
+    let shared = Arc::new(Mutex::new(unsafe { std::mem::zeroed() }));
     (Sender::new(shared.clone()), Receiver::new(shared))
 }
 
@@ -88,5 +88,23 @@ mod tests {
         let received = receiver.recv().unwrap();
 
         assert_eq!(received, payload);
+    }
+
+    #[test]
+    fn test_sender_can_be_sent_to_threads() {
+        let (sender, _) = channel();
+
+        std::thread::spawn(move || {
+            sender.send(DummyPayload::new()).unwrap();
+        });
+    }
+
+    #[test]
+    fn test_receiver_can_be_sent_to_threads() {
+        let (_, receiver): (_, Receiver<DummyPayload>) = channel();
+
+        std::thread::spawn(move || {
+            let _ = receiver.recv().unwrap();
+        });
     }
 }
