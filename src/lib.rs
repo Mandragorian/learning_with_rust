@@ -36,6 +36,13 @@ impl<T> Sender<T> {
     }
 }
 
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        let inner = Arc::clone(&self.inner);
+        Sender::new(inner)
+    }
+}
+
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
@@ -189,5 +196,15 @@ mod tests {
         });
 
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_cloning_works() {
+        let target_payload = DummyPayloadWithValue::new(32);
+        let (sender, receiver) = channel();
+        let sender2 = sender.clone();
+
+        sender2.send(DummyPayloadWithValue::new(32)).unwrap();
+        assert_eq!(receiver.recv().unwrap(), target_payload);
     }
 }
