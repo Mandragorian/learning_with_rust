@@ -1,44 +1,48 @@
-use std::marker::PhantomData;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub struct Sender<T> {
-    _payload: PhantomData<T>,
+    shared: Rc<RefCell<T>>,
 }
 
 impl<T> Sender<T> {
-    pub fn new() -> Self {
+    pub fn new(shared: Rc<RefCell<T>>) -> Self {
         Self {
-            _payload: PhantomData,
+            shared,
         }
     }
 
-    pub fn send(&self, _t: T) -> Result<(), ()> {
+    pub fn send(&self, t: T) -> Result<(), ()> {
+        *self.shared.borrow_mut() = t;
         Ok(())
     }
 }
 
 pub struct Receiver<T> {
-    _payload: PhantomData<T>,
+    shared: Rc<RefCell<T>>,
 }
 
 impl<T> Receiver<T> {
-    pub fn new() -> Self {
+    pub fn new(shared: Rc<RefCell<T>>) -> Self {
         Self {
-            _payload: PhantomData,
+            shared,
         }
     }
 
     pub fn recv(&self) -> Result<T, ()> {
-        Ok(unsafe { std::mem::zeroed() })
+        Ok(self.shared.replace(unsafe { std::mem::zeroed() }))
     }
 }
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    (Sender::new(), Receiver::new())
+    let shared = Rc::new(RefCell::new(unsafe { std::mem::zeroed() }));
+    (Sender::new(shared.clone()), Receiver::new(shared))
 }
 
 #[cfg(test)]
 mod tests {
-    struct DummyPayload {}
+    struct DummyPayload {
+    }
 
     impl DummyPayload {
         fn new() -> Self {
@@ -46,9 +50,22 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct DummyPayloadWithValue {
+        internal: u32,
+    }
+
+    impl DummyPayloadWithValue {
+        fn new(internal: u32) -> Self {
+            Self {
+                internal,
+            }
+        }
+    }
+
     use super::*;
     #[test]
-    fn sender_basic_api() {
+    fn test_sender_basic_api() {
         let payload1 = DummyPayload::new();
         let payload2 = DummyPayload::new();
         let (sender, _) = channel();
@@ -57,8 +74,19 @@ mod tests {
     }
 
     #[test]
-    fn receiver_basic_api() {
+    fn test_receiver_basic_api() {
         let (_, receiver): (_, Receiver<DummyPayload>) = channel();
         let res: DummyPayload = receiver.recv().unwrap();
+    }
+
+    #[test]
+    fn test_recv_returns_sent_value() {
+        let payload = DummyPayloadWithValue::new(4123);
+        let (sender, receiver) = channel();
+
+        sender.send(payload).unwrap();
+        let received = receiver.recv().unwrap();
+
+        assert_eq!(received, payload);
     }
 }
