@@ -27,8 +27,8 @@ impl<T> Receiver<T> {
         }
     }
 
-    pub fn recv(&self) -> Result<u8, ()> {
-        Ok(8)
+    pub fn recv(&self) -> Result<T, ()> {
+        Ok(unsafe { std::mem::zeroed() })
     }
 }
 
@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn receiver_basic_api() {
-        let (_, receiver): (_, Receiver<u8>) = channel();
-        let res: u8 = receiver.recv().unwrap();
+        let (_, receiver): (_, Receiver<DummyPayload>) = channel();
+        let res: DummyPayload = receiver.recv().unwrap();
     }
 }
