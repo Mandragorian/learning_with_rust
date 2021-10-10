@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn test_receiver_basic_api() {
         let (_, receiver): (_, Receiver<DummyPayload>) = channel();
-        let res: DummyPayload = receiver.recv().unwrap();
+        let _: DummyPayload = receiver.recv().unwrap();
     }
 
     #[test]
