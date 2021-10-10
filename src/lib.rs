@@ -1,44 +1,65 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar};
 use std::sync::Mutex;
 
+struct Inner<T> {
+    shared: Mutex<VecDeque<T>>,
+    cvar: Condvar,
+}
+
+impl<T> Inner<T> {
+    pub fn new() -> Self {
+        let shared = Mutex::new(VecDeque::new());
+        let cvar = Condvar::new();
+        Self {
+            shared,
+            cvar,
+        }
+    }
+}
+
 pub struct Sender<T> {
-    shared: Arc<Mutex<VecDeque<T>>>,
+    inner: Arc<Inner<T>>,
 }
 
 impl<T> Sender<T> {
-    pub fn new(shared: Arc<Mutex<VecDeque<T>>>) -> Self {
+    fn new(inner: Arc<Inner<T>>) -> Self {
         Self {
-            shared,
+            inner,
         }
     }
 
     pub fn send(&self, t: T) -> Result<(), ()> {
-        self.shared.lock().unwrap().push_back(t);
+        self.inner.shared.lock().unwrap().push_back(t);
+        self.inner.cvar.notify_one();
         Ok(())
     }
 }
 
 pub struct Receiver<T> {
-    shared: Arc<Mutex<VecDeque<T>>>,
+    inner: Arc<Inner<T>>,
 }
 
 impl<T> Receiver<T> {
-    pub fn new(shared: Arc<Mutex<VecDeque<T>>>) -> Self {
+    fn new(inner: Arc<Inner<T>>) -> Self {
         Self {
-            shared,
+            inner,
         }
     }
 
     pub fn recv(&self) -> Result<T, ()> {
-        let elem = self.shared.lock().unwrap().pop_front().unwrap();
+        let mut que = self.inner.shared.lock().unwrap();
+        while que.is_empty() {
+            que = self.inner.cvar.wait(que).unwrap();
+        };
+        let elem = que.pop_front().unwrap();
         Ok(elem)
     }
 }
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let shared = Arc::new(Mutex::new(VecDeque::new()));
-    (Sender::new(shared.clone()), Receiver::new(shared))
+    let inner = Arc::new(Inner::new());
+    (Sender::new(Arc::clone(&inner)), Receiver::new(Arc::clone(&inner)))
 }
 
 #[cfg(test)]
@@ -113,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_no_receive_without_send() {
-        let (_, receiver): (_, Receiver<DummyPayload>) = channel();
+        let (sender, receiver): (_, Receiver<DummyPayload>) = channel();
         let finished_flag = Arc::new(Mutex::new(false));
         let finished_flag2 = Arc::clone(&finished_flag);
         let pair = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
@@ -127,7 +148,8 @@ mod tests {
             cvar.notify_one();
 
             let res = receiver.recv().unwrap();
-            *finished_flag2.lock().unwrap() = true;
+            let mut finished = finished_flag2.lock().unwrap();
+            *finished = true;
             res
         });
 
@@ -138,8 +160,16 @@ mod tests {
             started = cvar.wait(started).unwrap();
         }
 
+        std::thread::sleep(std::time::Duration::from_millis(2000));
         if *finished_flag.lock().unwrap() {
             panic!("Spawned thread did not block on recv");
+        }
+
+        sender.send(DummyPayload::new()).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        if !*finished_flag.lock().unwrap() {
+            panic!("Spawned thread did not finish");
         }
     }
 
