@@ -107,4 +107,22 @@ mod tests {
             let _ = receiver.recv().unwrap();
         });
     }
+
+    #[test]
+    fn test_recv_returns_sent_value_threaded() {
+        let payload = DummyPayloadWithValue::new(4123);
+        let (sender, receiver) = channel();
+
+        std::thread::spawn(move || {
+            sender.send(payload).unwrap();
+        });
+
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            let received = receiver.recv().unwrap();
+            assert_eq!(received, payload);
+        });
+
+        handle.join().unwrap();
+    }
 }
