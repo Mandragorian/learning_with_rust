@@ -1,41 +1,43 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 pub struct Sender<T> {
-    shared: Arc<Mutex<T>>,
+    shared: Arc<Mutex<VecDeque<T>>>,
 }
 
 impl<T> Sender<T> {
-    pub fn new(shared: Arc<Mutex<T>>) -> Self {
+    pub fn new(shared: Arc<Mutex<VecDeque<T>>>) -> Self {
         Self {
             shared,
         }
     }
 
     pub fn send(&self, t: T) -> Result<(), ()> {
-        *self.shared.lock().unwrap() = t;
+        self.shared.lock().unwrap().push_back(t);
         Ok(())
     }
 }
 
 pub struct Receiver<T> {
-    shared: Arc<Mutex<T>>,
+    shared: Arc<Mutex<VecDeque<T>>>,
 }
 
 impl<T> Receiver<T> {
-    pub fn new(shared: Arc<Mutex<T>>) -> Self {
+    pub fn new(shared: Arc<Mutex<VecDeque<T>>>) -> Self {
         Self {
             shared,
         }
     }
 
     pub fn recv(&self) -> Result<T, ()> {
-        Ok(std::mem::replace(&mut self.shared.lock().unwrap(), unsafe { std::mem::zeroed() }))
+        let elem = self.shared.lock().unwrap().pop_front().unwrap();
+        Ok(elem)
     }
 }
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let shared = Arc::new(Mutex::new(unsafe { std::mem::zeroed() }));
+    let shared = Arc::new(Mutex::new(VecDeque::new()));
     (Sender::new(shared.clone()), Receiver::new(shared))
 }
 
@@ -75,7 +77,8 @@ mod tests {
 
     #[test]
     fn test_receiver_basic_api() {
-        let (_, receiver): (_, Receiver<DummyPayload>) = channel();
+        let (sender, receiver): (_, Receiver<DummyPayload>) = channel();
+        sender.send(DummyPayload::new()).unwrap();
         let _: DummyPayload = receiver.recv().unwrap();
     }
 
@@ -106,6 +109,38 @@ mod tests {
         std::thread::spawn(move || {
             let _ = receiver.recv().unwrap();
         });
+    }
+
+    #[test]
+    fn test_no_receive_without_send() {
+        let (_, receiver): (_, Receiver<DummyPayload>) = channel();
+        let finished_flag = Arc::new(Mutex::new(false));
+        let finished_flag2 = Arc::clone(&finished_flag);
+        let pair = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let pair2 = Arc::clone(&pair);
+
+        std::thread::spawn(move || {
+            let (lock, cvar) = &*pair2;
+            let mut started = lock.lock().unwrap();
+            *started = true;
+            drop(started);
+            cvar.notify_one();
+
+            let res = receiver.recv().unwrap();
+            *finished_flag2.lock().unwrap() = true;
+            res
+        });
+
+        let (lock, cvar) = &*pair;
+        let mut started = lock.lock().unwrap();
+
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+
+        if *finished_flag.lock().unwrap() {
+            panic!("Spawned thread did not block on recv");
+        }
     }
 
     #[test]
