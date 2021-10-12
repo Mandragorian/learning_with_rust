@@ -4,6 +4,7 @@ extern "C" {
 
 const SYS_FUTEX: u64 = 202;
 const FUTEX_WAIT: u32 = 0;
+const FUTEX_WAKE: u32 = 1;
 
 unsafe fn futex(futex_addr: u64, op: u32, val: u32, timespec: u64) -> i32 {
     syscall(SYS_FUTEX, futex_addr, op, val, timespec, 0, 0)
@@ -29,5 +30,8 @@ mod tests {
         let shared_int_addr_u64 = shared_int_addr as u64;
         let res = unsafe { futex(shared_int_addr_u64, FUTEX_WAIT, 1, 0) };
         assert_eq!(res, -1);
+
+        let res = unsafe { futex(shared_int_addr_u64, FUTEX_WAKE, 1, 0) };
+        assert_eq!(res, 0);
     }
 }
