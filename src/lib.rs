@@ -54,10 +54,15 @@ impl<T> Receiver<T> {
         }
     }
 
-    pub fn recv(&self) -> Result<T, ()> {
-        let mut que = self.inner.shared.lock().unwrap();
+    pub fn recv(&self) -> Result<T, &'static str> {
+        let mut que = self.inner.shared.lock().map_err(|_| "lock error")?;
         while que.is_empty() {
-            que = self.inner.cvar.wait(que).unwrap();
+            // If strong_count is 1, it means that there are no other
+            // senders, no more values will be received from this channel
+            if Arc::strong_count(&self.inner) == 1 {
+                return Err("no more values");
+            }
+            que = self.inner.cvar.wait(que).map_err(|_| "wait error")?;
         };
         let elem = que.pop_front().unwrap();
         Ok(elem)
@@ -206,5 +211,18 @@ mod tests {
 
         sender2.send(DummyPayloadWithValue::new(32)).unwrap();
         assert_eq!(receiver.recv().unwrap(), target_payload);
+    }
+
+    #[test]
+    fn test_no_hang_on_dropped_sender() {
+        let (sender, receiver): (Sender<DummyPayload>, Receiver<DummyPayload>) = channel();
+        let s2 = sender.clone();
+        drop(sender);
+
+        s2.send(DummyPayload::new()).unwrap();
+        assert!(receiver.recv().is_ok());
+
+        drop(s2);
+        assert!(receiver.recv().is_err());
     }
 }
