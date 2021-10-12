@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar};
 use std::sync::Mutex;
+use std::sync::{Arc, Condvar};
 
 struct Inner<T> {
     shared: Mutex<VecDeque<T>>,
@@ -11,10 +11,7 @@ impl<T> Inner<T> {
     pub fn new() -> Self {
         let shared = Mutex::new(VecDeque::new());
         let cvar = Condvar::new();
-        Self {
-            shared,
-            cvar,
-        }
+        Self { shared, cvar }
     }
 }
 
@@ -24,9 +21,7 @@ pub struct Sender<T> {
 
 impl<T> Sender<T> {
     fn new(inner: Arc<Inner<T>>) -> Self {
-        Self {
-            inner,
-        }
+        Self { inner }
     }
 
     pub fn send(&self, t: T) -> Result<(), ()> {
@@ -63,9 +58,7 @@ pub struct Receiver<T> {
 
 impl<T> Receiver<T> {
     fn new(inner: Arc<Inner<T>>) -> Self {
-        Self {
-            inner,
-        }
+        Self { inner }
     }
 
     pub fn recv(&self) -> Result<T, &'static str> {
@@ -77,7 +70,7 @@ impl<T> Receiver<T> {
                 return Err("no more values");
             }
             que = self.inner.cvar.wait(que).map_err(|_| "wait error")?;
-        };
+        }
         let elem = que.pop_front().unwrap();
         Ok(elem)
     }
@@ -85,13 +78,15 @@ impl<T> Receiver<T> {
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner::new());
-    (Sender::new(Arc::clone(&inner)), Receiver::new(Arc::clone(&inner)))
+    (
+        Sender::new(Arc::clone(&inner)),
+        Receiver::new(Arc::clone(&inner)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    struct DummyPayload {
-    }
+    struct DummyPayload {}
 
     impl DummyPayload {
         fn new() -> Self {
@@ -106,9 +101,7 @@ mod tests {
 
     impl DummyPayloadWithValue {
         fn new(internal: u32) -> Self {
-            Self {
-                internal,
-            }
+            Self { internal }
         }
     }
 
@@ -247,13 +240,11 @@ mod tests {
         let finished = Arc::new(Mutex::new(false));
         let finished2 = Arc::clone(&finished);
 
-        std::thread::spawn(move || {
-            match receiver.recv() {
-                Ok(_) => panic!("received value when it shouldn't"),
-                Err(msg) => {
-                    assert_eq!(msg, "no more values");
-                    *finished2.lock().unwrap() = true;
-                },
+        std::thread::spawn(move || match receiver.recv() {
+            Ok(_) => panic!("received value when it shouldn't"),
+            Err(msg) => {
+                assert_eq!(msg, "no more values");
+                *finished2.lock().unwrap() = true;
             }
         });
 
