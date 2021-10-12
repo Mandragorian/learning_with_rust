@@ -106,6 +106,10 @@ mod tests {
     }
 
     use super::*;
+    use std::sync::Condvar;
+    use std::thread::{sleep, spawn};
+    use std::time::Duration;
+
     #[test]
     fn test_sender_basic_api() {
         let payload1 = DummyPayload::new();
@@ -137,7 +141,7 @@ mod tests {
     fn test_sender_can_be_sent_to_threads() {
         let (sender, _) = channel();
 
-        std::thread::spawn(move || {
+        spawn(move || {
             sender.send(DummyPayload::new()).unwrap();
         });
     }
@@ -146,7 +150,7 @@ mod tests {
     fn test_receiver_can_be_sent_to_threads() {
         let (_, receiver): (_, Receiver<DummyPayload>) = channel();
 
-        std::thread::spawn(move || {
+        spawn(move || {
             let _ = receiver.recv().unwrap();
         });
     }
@@ -156,10 +160,10 @@ mod tests {
         let (sender, receiver): (_, Receiver<DummyPayload>) = channel();
         let finished_flag = Arc::new(Mutex::new(false));
         let finished_flag2 = Arc::clone(&finished_flag);
-        let pair = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let pair = Arc::new((Mutex::new(false), Condvar::new()));
         let pair2 = Arc::clone(&pair);
 
-        std::thread::spawn(move || {
+        spawn(move || {
             let (lock, cvar) = &*pair2;
             let mut started = lock.lock().unwrap();
             *started = true;
@@ -179,14 +183,14 @@ mod tests {
             started = cvar.wait(started).unwrap();
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(2000));
+        sleep(Duration::from_millis(2000));
         if *finished_flag.lock().unwrap() {
             panic!("Spawned thread did not block on recv");
         }
 
         sender.send(DummyPayload::new()).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(2000));
+        sleep(Duration::from_millis(2000));
         if !*finished_flag.lock().unwrap() {
             panic!("Spawned thread did not finish");
         }
@@ -197,12 +201,12 @@ mod tests {
         let payload = DummyPayloadWithValue::new(4123);
         let (sender, receiver) = channel();
 
-        std::thread::spawn(move || {
+        spawn(move || {
             sender.send(payload).unwrap();
         });
 
-        let handle = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+        let handle = spawn(move || {
+            sleep(Duration::from_millis(1000));
             let received = receiver.recv().unwrap();
             assert_eq!(received, payload);
         });
@@ -240,7 +244,7 @@ mod tests {
         let finished = Arc::new(Mutex::new(false));
         let finished2 = Arc::clone(&finished);
 
-        std::thread::spawn(move || match receiver.recv() {
+        spawn(move || match receiver.recv() {
             Ok(_) => panic!("received value when it shouldn't"),
             Err(msg) => {
                 assert_eq!(msg, "no more values");
@@ -248,15 +252,15 @@ mod tests {
             }
         });
 
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        sleep(Duration::from_millis(1000));
         assert!(!*finished.lock().unwrap());
 
         drop(sender);
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        sleep(Duration::from_millis(1000));
         assert!(!*finished.lock().unwrap());
 
         drop(sender2);
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        sleep(Duration::from_millis(1000));
         assert!(*finished.lock().unwrap());
     }
 }
