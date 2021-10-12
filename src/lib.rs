@@ -43,6 +43,20 @@ impl<T> Clone for Sender<T> {
     }
 }
 
+impl<T> Drop for Sender<T> {
+    fn drop(&mut self) {
+        // If strong_count is 2, this means there are two strong references
+        // to the inner struct. One is us. If the other is another sender,
+        // then it doesn't matter if we notify the cvar, since no one is
+        // waiting on it.
+        // If the other is the receiver, then it is safe to notify them,
+        // since there will be no other senders after we are droped.
+        if Arc::strong_count(&self.inner) == 2 {
+            self.inner.cvar.notify_one();
+        }
+    }
+}
+
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
@@ -224,5 +238,34 @@ mod tests {
 
         drop(s2);
         assert!(receiver.recv().is_err());
+    }
+
+    #[test]
+    fn test_drop_senders_wakes_receiver() {
+        let (sender, receiver): (Sender<DummyPayload>, _) = channel();
+        let sender2 = sender.clone();
+        let finished = Arc::new(Mutex::new(false));
+        let finished2 = Arc::clone(&finished);
+
+        std::thread::spawn(move || {
+            match receiver.recv() {
+                Ok(_) => panic!("received value when it shouldn't"),
+                Err(msg) => {
+                    assert_eq!(msg, "no more values");
+                    *finished2.lock().unwrap() = true;
+                },
+            }
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        assert!(!*finished.lock().unwrap());
+
+        drop(sender);
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        assert!(!*finished.lock().unwrap());
+
+        drop(sender2);
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        assert!(*finished.lock().unwrap());
     }
 }
