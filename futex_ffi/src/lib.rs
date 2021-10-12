@@ -10,6 +10,14 @@ unsafe fn futex(futex_addr: u64, op: u32, val: u32, timespec: u64) -> i32 {
     syscall(SYS_FUTEX, futex_addr, op, val, timespec, 0, 0)
 }
 
+pub unsafe fn futex_wait(futex_addr: u64, val: u32, timespec: u64) -> i32 {
+    futex(futex_addr, FUTEX_WAIT, val, timespec)
+}
+
+pub unsafe fn futex_wake(futex_addr: u64, val: u32, timespec: u64) -> i32 {
+    futex(futex_addr, FUTEX_WAKE, val, timespec)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -42,11 +50,11 @@ mod tests {
         let shared_int_addr_u64 = shared_int_addr as u64;
 
         let handle = std::thread::spawn(move || {
-            unsafe { futex(shared_int_addr_u64, FUTEX_WAIT, 0, 0) }
+            unsafe { futex_wait(shared_int_addr_u64, 0, 0) }
         });
 
         std::thread::sleep(std::time::Duration::from_millis(2000));
-        let res = unsafe { futex(shared_int_addr_u64, FUTEX_WAKE, 1, 0) };
+        let res = unsafe { futex_wake(shared_int_addr_u64, 1, 0) };
         assert_eq!(res, 1);
 
         // Checking that the return value is zero checks both that 
