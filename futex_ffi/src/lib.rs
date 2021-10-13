@@ -1,5 +1,8 @@
 use std::sync::atomic::AtomicU32;
 
+pub struct FutexTimeout(u32, u32);
+
+
 extern "C" {
     fn syscall(syscall: u64, futex_addr: u64, op: u32, val: u32, timespec: u64, uaddr2: u64, val3: u32) -> i32;
 }
@@ -8,23 +11,24 @@ const SYS_FUTEX: u64 = 202;
 const FUTEX_WAIT: u32 = 0;
 const FUTEX_WAKE: u32 = 1;
 
-unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timespec: u64) -> i32 {
+unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
     let futex_addr = (futex_ref as *const AtomicU32) as u64;
-    syscall(SYS_FUTEX, futex_addr, op, val, timespec, 0, 0)
+    syscall(SYS_FUTEX, futex_addr, op, val, 0, 0, 0)
 }
 
-pub unsafe fn futex_wait(futex_addr: &AtomicU32, val: u32, timespec: u64) -> i32 {
-    futex(futex_addr, FUTEX_WAIT, val, timespec)
+pub unsafe fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+    futex(futex_addr, FUTEX_WAIT, val, timeout)
 }
 
-pub unsafe fn futex_wake(futex_addr: &AtomicU32, val: u32, timespec: u64) -> i32 {
-    futex(futex_addr, FUTEX_WAKE, val, timespec)
+pub unsafe fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+    futex(futex_addr, FUTEX_WAKE, val, timeout)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn syscall_basic_functionality() {
@@ -38,10 +42,10 @@ mod tests {
     #[test]
     fn futext_basic_functionality() {
         let shared_int = AtomicU32::new(0);
-        let res = unsafe { futex(&shared_int, FUTEX_WAIT, 1, 0) };
+        let res = unsafe { futex(&shared_int, FUTEX_WAIT, 1, None) };
         assert_eq!(res, -1);
 
-        let res = unsafe { futex(&shared_int, FUTEX_WAKE, 1, 0) };
+        let res = unsafe { futex(&shared_int, FUTEX_WAKE, 1, None) };
         assert_eq!(res, 0);
     }
 
@@ -51,11 +55,11 @@ mod tests {
         let shared_int2 = Arc::clone(&shared_int);
 
         let handle = std::thread::spawn(move || {
-            unsafe { futex_wait(shared_int2.as_ref(), 0, 0) }
+            unsafe { futex_wait(shared_int2.as_ref(), 0, None) }
         });
 
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-        let res = unsafe { futex_wake(&shared_int, 1, 0) };
+        std::thread::sleep(Duration::from_millis(2000));
+        let res = unsafe { futex_wake(&shared_int, 1, None) };
         assert_eq!(res, 1);
 
         // Checking that the return value is zero checks both that 
