@@ -3,7 +3,7 @@ pub struct Futer<T> {
 }
 
 impl<T> Futer<T> {
-    pub fn new(val: T) -> Self {
+    pub fn new(_val: T) -> Self {
         Self { _phantom: std::marker::PhantomData }
     }
 }
@@ -14,7 +14,7 @@ mod tests {
 
     #[test]
     fn futer_can_be_correctly_constructed() {
-        let futer = Futer::new(32);
+        let _futer = Futer::new(32);
     }
 
     #[test]
