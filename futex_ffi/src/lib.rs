@@ -35,12 +35,12 @@ unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexT
     syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, 0, 0)
 }
 
-pub unsafe fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
-    futex(futex_addr, FUTEX_WAIT, val, timeout)
+pub fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+    unsafe { futex(futex_addr, FUTEX_WAIT, val, timeout) }
 }
 
-pub unsafe fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
-    futex(futex_addr, FUTEX_WAKE, val, timeout)
+pub fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+    unsafe { futex(futex_addr, FUTEX_WAKE, val, timeout) }
 }
 
 #[cfg(test)]
@@ -74,11 +74,11 @@ mod tests {
         let shared_int2 = Arc::clone(&shared_int);
 
         let handle = std::thread::spawn(move || {
-            unsafe { futex_wait(shared_int2.as_ref(), 0, None) }
+            futex_wait(shared_int2.as_ref(), 0, None)
         });
 
         std::thread::sleep(Duration::from_millis(2000));
-        let res = unsafe { futex_wake(&shared_int, 1, None) };
+        let res = futex_wake(&shared_int, 1, None);
         assert_eq!(res, 1);
 
         // Checking that the return value is zero checks both that 
@@ -93,7 +93,7 @@ mod tests {
         let finished2 = Arc::clone(&finished);
 
         std::thread::spawn(move || {
-            unsafe { futex_wait(&shared_int, 1, Some(FutexTimeout(0,500000000))) };
+            futex_wait(&shared_int, 1, Some(FutexTimeout(0,500000000)));
             finished2.store(true, std::sync::atomic::Ordering::Relaxed);
         });
 
