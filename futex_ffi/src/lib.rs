@@ -13,7 +13,15 @@ struct c_timespec {
 }
 
 extern "C" {
-    fn syscall(syscall: u64, futex_addr: u64, op: u32, val: u32, timeout: u64, uaddr2: u64, val3: u32) -> i32;
+    fn syscall(
+        syscall: u64,
+        futex_addr: u64,
+        op: u32,
+        val: u32,
+        timeout: u64,
+        uaddr2: u64,
+        val3: u32,
+    ) -> i32;
 }
 
 const SYS_FUTEX: u64 = 202;
@@ -30,7 +38,7 @@ unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexT
                 tv_nsec: duration.1,
             };
             (&timespec as *const c_timespec) as u64
-        },
+        }
     };
     syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, 0, 0)
 }
@@ -46,7 +54,9 @@ pub fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::thread::{sleep, spawn};
     use std::time::Duration;
 
     #[test]
@@ -73,15 +83,13 @@ mod tests {
         let shared_int = Arc::new(AtomicU32::new(0));
         let shared_int2 = Arc::clone(&shared_int);
 
-        let handle = std::thread::spawn(move || {
-            futex_wait(shared_int2.as_ref(), 0, None)
-        });
+        let handle = spawn(move || futex_wait(shared_int2.as_ref(), 0, None));
 
-        std::thread::sleep(Duration::from_millis(2000));
+        sleep(Duration::from_millis(2000));
         let res = futex_wake(&shared_int, 1, None);
         assert_eq!(res, 1);
 
-        // Checking that the return value is zero checks both that 
+        // Checking that the return value is zero checks both that
         // the thread was woken up, and with no errors
         assert_eq!(handle.join().unwrap(), 0);
     }
@@ -92,12 +100,12 @@ mod tests {
         let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let finished2 = Arc::clone(&finished);
 
-        std::thread::spawn(move || {
-            futex_wait(&shared_int, 1, Some(FutexTimeout(0,500000000)));
-            finished2.store(true, std::sync::atomic::Ordering::Relaxed);
+        spawn(move || {
+            futex_wait(&shared_int, 1, Some(FutexTimeout(0, 500000000)));
+            finished2.store(true, Ordering::Relaxed);
         });
 
-        std::thread::sleep(Duration::from_secs(1));
-        assert!(finished.load(std::sync::atomic::Ordering::Relaxed));
+        sleep(Duration::from_secs(1));
+        assert!(finished.load(Ordering::Relaxed));
     }
 }
