@@ -2,6 +2,15 @@ use std::sync::atomic::AtomicU32;
 
 pub struct FutexTimeout(u32, u32);
 
+#[allow(non_camel_case_types)]
+type c_time_t = u32;
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct c_timespec {
+    tv_sec: c_time_t,
+    tv_nsec: u32,
+}
 
 extern "C" {
     fn syscall(syscall: u64, futex_addr: u64, op: u32, val: u32, timespec: u64, uaddr2: u64, val3: u32) -> i32;
@@ -13,7 +22,17 @@ const FUTEX_WAKE: u32 = 1;
 
 unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
     let futex_addr = (futex_ref as *const AtomicU32) as u64;
-    syscall(SYS_FUTEX, futex_addr, op, val, 0, 0, 0)
+    let timeout_ptr = match timeout {
+        None => 0,
+        Some(duration) => {
+            let timespec = c_timespec {
+                tv_sec: duration.0,
+                tv_nsec: duration.1,
+            };
+            (&timespec as *const c_timespec) as u64
+        },
+    };
+    syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, 0, 0)
 }
 
 pub unsafe fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
@@ -65,5 +84,20 @@ mod tests {
         // Checking that the return value is zero checks both that 
         // the thread was woken up, and with no errors
         assert_eq!(handle.join().unwrap(), 0);
+    }
+
+    #[test]
+    fn futex_wakes_up_after_timeout() {
+        let shared_int = AtomicU32::new(1);
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finished2 = Arc::clone(&finished);
+
+        std::thread::spawn(move || {
+            unsafe { futex_wait(&shared_int, 1, Some(FutexTimeout(0,500000000))) };
+            finished2.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+        assert!(finished.load(std::sync::atomic::Ordering::Relaxed));
     }
 }
