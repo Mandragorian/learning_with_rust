@@ -12,6 +12,18 @@ struct c_timespec {
     tv_nsec: u32,
 }
 
+impl From<FutexTimeout> for c_timespec {
+    fn from(timeout: FutexTimeout) -> Self {
+        println!("here");
+        let tv_sec = timeout.0;
+        let tv_nsec = timeout.1;
+        Self {
+            tv_sec,
+            tv_nsec,
+        }
+    }
+}
+
 extern "C" {
     fn syscall(
         syscall: u64,
@@ -33,10 +45,7 @@ unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexT
     let timeout_ptr = match timeout {
         None => 0,
         Some(duration) => {
-            let timespec = c_timespec {
-                tv_sec: duration.0,
-                tv_nsec: duration.1,
-            };
+            let timespec = c_timespec::from(duration);
             (&timespec as *const c_timespec) as u64
         }
     };
