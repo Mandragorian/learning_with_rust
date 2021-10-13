@@ -1,7 +1,7 @@
 pub struct Futer;
 
 impl Futer {
-    pub fn new() -> Self {
+    pub fn new(val: u32) -> Self {
         Self
     }
 }
@@ -11,7 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn type_exists() {
-        let futer = Futer::new();
+    fn futer_can_be_correctly_constructed() {
+        let futer = Futer::new(32);
     }
 }
