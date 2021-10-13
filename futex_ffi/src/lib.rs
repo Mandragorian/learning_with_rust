@@ -1,5 +1,5 @@
-use std::sync::atomic::AtomicU32;
 use std::ptr::null;
+use std::sync::atomic::AtomicU32;
 
 pub struct FutexTimeout(u32, u32);
 
@@ -18,10 +18,7 @@ impl From<FutexTimeout> for c_timespec {
         println!("here");
         let tv_sec = timeout.0;
         let tv_nsec = timeout.1;
-        Self {
-            tv_sec,
-            tv_nsec,
-        }
+        Self { tv_sec, tv_nsec }
     }
 }
 
