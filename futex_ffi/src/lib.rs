@@ -1,4 +1,5 @@
 use std::sync::atomic::AtomicU32;
+use std::ptr::null;
 
 pub struct FutexTimeout(u32, u32);
 
@@ -27,11 +28,11 @@ impl From<FutexTimeout> for c_timespec {
 extern "C" {
     fn syscall(
         syscall: u64,
-        futex_addr: u64,
+        futex_addr: *const AtomicU32,
         op: u32,
         val: u32,
-        timeout: u64,
-        uaddr2: u64,
+        timeout: *const c_timespec,
+        uaddr2: *const u32,
         val3: u32,
     ) -> i32;
 }
@@ -41,15 +42,15 @@ const FUTEX_WAIT: u32 = 0;
 const FUTEX_WAKE: u32 = 1;
 
 unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
-    let futex_addr = (futex_ref as *const AtomicU32) as u64;
-    let timeout_ptr = match timeout {
-        None => 0,
+    let futex_addr = futex_ref as *const AtomicU32;
+    let timeout_ptr: *const c_timespec = match timeout {
+        None => null(),
         Some(duration) => {
             let timespec = c_timespec::from(duration);
-            (&timespec as *const c_timespec) as u64
+            (&timespec) as *const c_timespec
         }
     };
-    syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, 0, 0)
+    syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, null(), 0)
 }
 
 pub fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
@@ -73,7 +74,7 @@ mod tests {
         let shared_int: u32 = 0;
         let shared_int_addr = &shared_int as *const u32;
         let shared_int_addr_u64 = shared_int_addr as u64;
-        let res = unsafe { syscall(SYS_FUTEX, shared_int_addr_u64, FUTEX_WAIT, 1, 0, 0, 0) };
+        let res = unsafe { syscall(SYS_FUTEX, null(), FUTEX_WAIT, 1, null(), null(), 0) };
         assert_eq!(res, -1);
     }
 
