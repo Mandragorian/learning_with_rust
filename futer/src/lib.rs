@@ -47,4 +47,16 @@ mod tests {
 
         Futer::unlock(lock);
     }
+
+    #[test]
+    fn futer_is_send_and_sync() {
+        // Arc<T> is Sync + Send only if T is Sync + Send, so
+        // if Arc<Futer<T>> is Send, Futer<T> is Sync + Send.
+        let futer = std::sync::Arc::new(Futer::new(32));
+
+        std::thread::spawn(move || {
+            let v = futer.lock().unwrap();
+            assert_eq!(v, &32);
+        });
+    }
 }
