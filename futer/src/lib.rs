@@ -10,6 +10,10 @@ impl<T> Futer<T> {
     pub fn lock(&self) -> Result<&T, ()> {
         Ok(&self.val)
     }
+
+    pub fn unlock(guard: &T) {
+        drop(guard)
+    }
 }
 
 #[cfg(test)]
@@ -34,5 +38,13 @@ mod tests {
 
         let futer = Futer::new(String::from("asdf"));
         assert_eq!(futer.lock().unwrap().as_str(), "asdf");
+    }
+
+    #[test]
+    fn futer_unlock_api() {
+        let futer = Futer::new(32);
+        let lock = futer.lock().unwrap();
+
+        Futer::unlock(lock);
     }
 }
