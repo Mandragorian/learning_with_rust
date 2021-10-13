@@ -1,17 +1,20 @@
+#[cfg(all(feature = "libc", feature = "libcosti"))]
+compile_error!("feature \"libc\" and feature \"libcosti\" cannot be enabled at the same time");
+
+#[cfg(feature = "libc")]
+mod lib_c;
+#[cfg(feature = "libcosti")]
+mod lib_costi;
+
+#[cfg(feature = "libc")]
+use crate::lib_c::*;
+#[cfg(feature = "libcosti")]
+use crate::lib_costi::*;
+
 use std::ptr::null;
 use std::sync::atomic::AtomicU32;
 
-pub struct FutexTimeout(u32, u32);
-
-#[allow(non_camel_case_types)]
-type c_time_t = u32;
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-struct c_timespec {
-    tv_sec: c_time_t,
-    tv_nsec: u32,
-}
+pub struct FutexTimeout(i64, i64);
 
 impl From<FutexTimeout> for c_timespec {
     fn from(timeout: FutexTimeout) -> Self {
@@ -22,23 +25,7 @@ impl From<FutexTimeout> for c_timespec {
     }
 }
 
-extern "C" {
-    fn syscall(
-        syscall: u64,
-        futex_addr: *const AtomicU32,
-        op: u32,
-        val: u32,
-        timeout: *const c_timespec,
-        uaddr2: *const u32,
-        val3: u32,
-    ) -> i32;
-}
-
-const SYS_FUTEX: u64 = 202;
-const FUTEX_WAIT: u32 = 0;
-const FUTEX_WAKE: u32 = 1;
-
-unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+unsafe fn futex(futex_ref: &AtomicU32, op: i32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
     let futex_addr = futex_ref as *const AtomicU32;
     let timeout_ptr = match timeout {
         None => null(),
@@ -50,11 +37,11 @@ unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexT
     syscall(SYS_FUTEX, futex_addr, op, val, timeout_ptr, null(), 0)
 }
 
-pub fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+pub fn futex_wait(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
     unsafe { futex(futex_addr, FUTEX_WAIT, val, timeout) }
 }
 
-pub fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
+pub fn futex_wake(futex_addr: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
     unsafe { futex(futex_addr, FUTEX_WAKE, val, timeout) }
 }
 
@@ -68,10 +55,9 @@ mod tests {
 
     #[test]
     fn syscall_basic_functionality() {
-        let shared_int: u32 = 0;
-        let shared_int_addr = &shared_int as *const u32;
-        let shared_int_addr_u64 = shared_int_addr as u64;
-        let res = unsafe { syscall(SYS_FUTEX, null(), FUTEX_WAIT, 1, null(), null(), 0) };
+        let shared_int = AtomicU32::new(0);
+        let shared_int_addr = &shared_int as *const AtomicU32;
+        let res = unsafe { syscall(SYS_FUTEX, shared_int_addr, FUTEX_WAIT, 1, null(), null(), 0) };
         assert_eq!(res, -1);
     }
 
