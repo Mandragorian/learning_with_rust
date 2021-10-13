@@ -40,7 +40,7 @@ const FUTEX_WAKE: u32 = 1;
 
 unsafe fn futex(futex_ref: &AtomicU32, op: u32, val: u32, timeout: Option<FutexTimeout>) -> i32 {
     let futex_addr = futex_ref as *const AtomicU32;
-    let timeout_ptr: *const c_timespec = match timeout {
+    let timeout_ptr = match timeout {
         None => null(),
         Some(duration) => {
             let timespec = c_timespec::from(duration);
