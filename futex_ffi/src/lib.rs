@@ -13,7 +13,7 @@ struct c_timespec {
 }
 
 extern "C" {
-    fn syscall(syscall: u64, futex_addr: u64, op: u32, val: u32, timespec: u64, uaddr2: u64, val3: u32) -> i32;
+    fn syscall(syscall: u64, futex_addr: u64, op: u32, val: u32, timeout: u64, uaddr2: u64, val3: u32) -> i32;
 }
 
 const SYS_FUTEX: u64 = 202;
