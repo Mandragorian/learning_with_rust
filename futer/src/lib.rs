@@ -19,16 +19,17 @@ impl<T> std::ops::DerefMut for FuterGuard<T> {
 }
 
 pub struct Futer<T> {
-    val: T,
+    val: Box<T>,
 }
 
 impl<T> Futer<T> {
-    pub fn new(val: T) -> Self {
+    pub fn new(unboxed_val: T) -> Self {
+        let val = Box::new(unboxed_val);
         Self { val }
     }
 
     pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
-        Ok(FuterGuard { ptr: &self.val as *const T })
+        Ok(FuterGuard { ptr: self.val.as_ref() as *const T })
     }
 
     pub fn unlock(guard: FuterGuard<T>) {
@@ -81,5 +82,19 @@ mod tests {
             let v = futer.lock().unwrap();
             assert_eq!(*v, 32);
         });
+    }
+
+    #[test]
+    fn basic_allocate_on_heap() {
+
+        fn dummy_stack() -> (Futer<u32>, *const u32) {
+            let f = Futer::new(32);
+            let f_ptr = &*f.lock().unwrap() as *const u32;
+            (f, f_ptr)
+        }
+
+        let (futer, ptr) = dummy_stack();
+
+        assert_eq!(&*futer.lock().unwrap() as *const u32, ptr);
     }
 }
