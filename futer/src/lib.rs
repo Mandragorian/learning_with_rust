@@ -3,6 +3,12 @@ pub struct FuterGuard<T> {
     ptr: *const T,
 }
 
+impl<T> FuterGuard<T> {
+    fn new(ptr: *const T) -> Self {
+        Self { ptr }
+    }
+}
+
 impl<T> std::ops::Deref for FuterGuard<T> {
     type Target = T;
 
@@ -29,7 +35,7 @@ impl<T> Futer<T> {
     }
 
     pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
-        Ok(FuterGuard { ptr: self.val.as_ref() as *const T })
+        Ok(FuterGuard::new(self.val.as_ref() as *const T))
     }
 
     pub fn unlock(guard: FuterGuard<T>) {
