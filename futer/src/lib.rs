@@ -1,3 +1,23 @@
+#[derive(Debug)]
+pub struct FuterGuard<T> {
+    ptr: *const T,
+}
+
+impl<T> std::ops::Deref for FuterGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.ptr.as_ref().unwrap() }
+    }
+}
+
+impl<T> std::ops::DerefMut for FuterGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let ptr_mut = self.ptr as *mut T;
+        unsafe { ptr_mut.as_mut().unwrap() }
+    }
+}
+
 pub struct Futer<T> {
     val: T,
 }
@@ -7,11 +27,11 @@ impl<T> Futer<T> {
         Self { val }
     }
 
-    pub fn lock(&self) -> Result<&T, ()> {
-        Ok(&self.val)
+    pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
+        Ok(FuterGuard { ptr: &self.val as *const T })
     }
 
-    pub fn unlock(guard: &T) {
+    pub fn unlock(guard: FuterGuard<T>) {
         drop(guard)
     }
 }
@@ -34,7 +54,10 @@ mod tests {
     #[test]
     fn futer_lock_api() {
         let futer = Futer::new(32);
-        assert_eq!(futer.lock().unwrap(), &32);
+        assert_eq!(*futer.lock().unwrap(), 32);
+
+        *futer.lock().unwrap() = 42;
+        assert_eq!(*futer.lock().unwrap(), 42);
 
         let futer = Futer::new(String::from("asdf"));
         assert_eq!(futer.lock().unwrap().as_str(), "asdf");
@@ -56,7 +79,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let v = futer.lock().unwrap();
-            assert_eq!(v, &32);
+            assert_eq!(*v, 32);
         });
     }
 }
