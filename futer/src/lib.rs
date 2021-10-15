@@ -1,6 +1,6 @@
 #![feature(dropck_eyepatch)]
 
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use futex_ffi::{futex_wait, futex_wake};
 
@@ -45,6 +45,11 @@ unsafe impl<'a, #[may_dangle] T> Drop for FuterGuard<'a, T> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum TryLockError {
+    WouldBlock,
+}
+
 pub struct Futer<T> {
     val: Box<T>,
     lock: Box<AtomicU32>,
@@ -58,7 +63,6 @@ impl<T> Futer<T> {
     }
 
     pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
-        use std::sync::atomic::Ordering;
 
         loop {
             match self
@@ -75,6 +79,17 @@ impl<T> Futer<T> {
                     futex_wait(&self.lock, 1, None);
                 }
             }
+        }
+    }
+
+    pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
+        match self.lock.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) =>
+                Ok(FuterGuard::new(
+                    self.val.as_ref() as *const T,
+                    self.lock.as_ref(),
+                )),
+            Err(_) => Err(TryLockError::WouldBlock)
         }
     }
 
@@ -173,6 +188,36 @@ mod tests {
 
             finished_barrier.wait();
             assert_eq!(*futer.lock().unwrap(), NUM_THREADS);
+        }
+    }
+
+    #[test]
+    fn try_lock_api() {
+        let futer = Futer::new(32);
+        let mut lock = futer.try_lock().unwrap();
+
+        assert_eq!(*lock, 32);
+
+        *lock = 42;
+        assert_eq!(*lock, 42);
+
+
+        Futer::unlock(lock);
+    }
+
+    #[test]
+    fn try_lock_would_block() {
+        let futer = Futer::new(32);
+        let futer2 = &futer;
+        let _lock = futer.lock();
+
+        {
+            let lock2 = futer2.try_lock();
+            if let Err(err) = lock2 {
+                assert_eq!(TryLockError::WouldBlock, err);
+            } else {
+                panic!("try_lock did not return error");
+            }
         }
     }
 }
