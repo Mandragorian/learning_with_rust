@@ -40,7 +40,7 @@ impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
 // Safety: T is never accessed in drop, so it is safe to let it dangle
 unsafe impl<'a, #[may_dangle] T> Drop for FuterGuard<'a, T> {
     fn drop(&mut self) {
-        self.lock.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.lock.store(0, std::sync::atomic::Ordering::Release);
         futex_wake(self.lock, u32::MAX, None);
     }
 }
@@ -67,7 +67,7 @@ impl<T> Futer<T> {
         loop {
             match self
                 .lock
-                .compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed)
+                .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
             {
                 Ok(_) => {
                     break Ok(FuterGuard::new(
@@ -83,7 +83,7 @@ impl<T> Futer<T> {
     }
 
     pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
-        match self.lock.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed) {
+        match self.lock.compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire) {
             Ok(_) =>
                 Ok(FuterGuard::new(
                     self.val.as_ref() as *const T,
