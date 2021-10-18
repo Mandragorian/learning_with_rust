@@ -67,7 +67,7 @@ impl<T> Futer<T> {
         loop {
             match self
                 .lock
-                .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Acquire)
             {
                 Ok(_) => {
                     break Ok(FuterGuard::new(
@@ -83,7 +83,7 @@ impl<T> Futer<T> {
     }
 
     pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
-        match self.lock.compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire) {
+        match self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Acquire) {
             Ok(_) =>
                 Ok(FuterGuard::new(
                     self.val.as_ref() as *const T,
