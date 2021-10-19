@@ -4,25 +4,43 @@
 extern crate test;
 
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::marker::PhantomData;
 
-use futex_ffi::{futex_wait, futex_wake};
+use futex_ffi::{futex_wait, futex_wake, FutexTimeout};
+
+trait Futex {
+    fn futex_wake(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64;
+    fn futex_wait(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64;
+}
+
+#[derive(Debug)]
+struct RealFutexCalls;
+impl Futex for RealFutexCalls {
+    fn futex_wake(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
+        futex_wake(lock, val, timeout)
+    }
+    fn futex_wait(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
+        futex_wait(lock, val, timeout)
+    }
+}
 
 const UNLOCKED: u32 = 0;
 const LOCKED: u32 = 1;
 
 #[derive(Debug)]
-pub struct FuterGuard<'a, T> {
+struct FuterGuardInternal<'a, T, F: Futex> {
     ptr: *const T,
     lock: &'a AtomicU32,
+    _futex: PhantomData<fn() -> F>,
 }
 
-impl<'a, T> FuterGuard<'a, T> {
+impl<'a, T, F: Futex> FuterGuardInternal<'a, T, F> {
     fn new(ptr: *const T, lock: &'a AtomicU32) -> Self {
-        Self { ptr, lock }
+        Self { ptr, lock, _futex: PhantomData }
     }
 }
 
-impl<'a, T> std::ops::Deref for FuterGuard<'a, T> {
+impl<'a, T, F: Futex> std::ops::Deref for FuterGuardInternal<'a, T, F> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -34,7 +52,7 @@ impl<'a, T> std::ops::Deref for FuterGuard<'a, T> {
     }
 }
 
-impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
+impl<'a, T, F: Futex> std::ops::DerefMut for FuterGuardInternal<'a, T, F> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let ptr_mut = self.ptr as *mut T;
         // Safety: Since self exists, we have gained access to the lock, and we can
@@ -44,10 +62,10 @@ impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
 }
 
 // Safety: T is never accessed in drop, so it is safe to let it dangle
-unsafe impl<'a, #[may_dangle] T> Drop for FuterGuard<'a, T> {
+unsafe impl<'a, #[may_dangle] T, #[may_dangle] F: Futex> Drop for FuterGuardInternal<'a, T, F> {
     fn drop(&mut self) {
         self.lock.store(UNLOCKED, std::sync::atomic::Ordering::Release);
-        futex_wake(self.lock, u32::MAX, None);
+        F::futex_wake(self.lock, u32::MAX, None);
     }
 }
 
@@ -56,19 +74,20 @@ pub enum TryLockError {
     WouldBlock,
 }
 
-pub struct Futer<T> {
+struct FuterInternal<T, F: Futex> {
     val: Box<T>,
     lock: Box<AtomicU32>,
+    _futex: PhantomData<fn() -> F>,
 }
 
-impl<T> Futer<T> {
-    pub fn new(unboxed_val: T) -> Self {
+impl<T, F: Futex> FuterInternal<T, F> {
+    fn new(unboxed_val: T) -> Self {
         let val = Box::new(unboxed_val);
         let lock = Box::new(AtomicU32::new(UNLOCKED));
-        Self { val, lock }
+        Self { val, lock, _futex: PhantomData }
     }
 
-    pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
+    fn lock(&self) -> Result<FuterGuardInternal<T, F>, ()> {
 
         loop {
             match self
@@ -76,22 +95,22 @@ impl<T> Futer<T> {
                 .compare_exchange_weak(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire)
             {
                 Ok(_) => {
-                    break Ok(FuterGuard::new(
+                    break Ok(FuterGuardInternal::new(
                         self.val.as_ref() as *const T,
                         self.lock.as_ref(),
                     ))
                 }
                 Err(_) => {
-                    futex_wait(&self.lock, 1, None);
+                    F::futex_wait(&self.lock, 1, None);
                 }
             }
         }
     }
 
-    pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
+    fn try_lock(&self) -> Result<FuterGuardInternal<T, F>, TryLockError> {
         match self.lock.compare_exchange_weak(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire) {
             Ok(_) =>
-                Ok(FuterGuard::new(
+                Ok(FuterGuardInternal::new(
                     self.val.as_ref() as *const T,
                     self.lock.as_ref(),
                 )),
@@ -99,8 +118,45 @@ impl<T> Futer<T> {
         }
     }
 
-    pub fn unlock(guard: FuterGuard<T>) {
+    fn unlock(guard: FuterGuardInternal<T, F>) {
         drop(guard)
+    }
+}
+
+pub struct Futer<T>(FuterInternal<T, RealFutexCalls>);
+
+impl<T> Futer<T> {
+    pub fn new(val: T) -> Self {
+        Futer(FuterInternal::new(val))
+    }
+
+    pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
+        self.0.lock().map(|guard| FuterGuard(guard))
+    }
+
+    pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
+        self.0.try_lock().map(|guard| FuterGuard(guard))
+    }
+
+    pub fn unlock(guard: FuterGuard<T>) {
+        FuterInternal::unlock(guard.0)
+    }
+}
+
+#[derive(Debug)]
+pub struct FuterGuard<'a, T>(FuterGuardInternal<'a, T, RealFutexCalls>);
+
+impl<'a, T> std::ops::Deref for FuterGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
     }
 }
 
