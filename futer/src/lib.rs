@@ -1,8 +1,14 @@
 #![feature(dropck_eyepatch)]
+#![feature(test)]
+
+extern crate test;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use futex_ffi::{futex_wait, futex_wake};
+
+const UNLOCKED: u32 = 0;
+const LOCKED: u32 = 1;
 
 #[derive(Debug)]
 pub struct FuterGuard<'a, T> {
@@ -40,7 +46,7 @@ impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
 // Safety: T is never accessed in drop, so it is safe to let it dangle
 unsafe impl<'a, #[may_dangle] T> Drop for FuterGuard<'a, T> {
     fn drop(&mut self) {
-        self.lock.store(0, std::sync::atomic::Ordering::Release);
+        self.lock.store(UNLOCKED, std::sync::atomic::Ordering::Release);
         futex_wake(self.lock, u32::MAX, None);
     }
 }
@@ -58,7 +64,7 @@ pub struct Futer<T> {
 impl<T> Futer<T> {
     pub fn new(unboxed_val: T) -> Self {
         let val = Box::new(unboxed_val);
-        let lock = Box::new(AtomicU32::new(0));
+        let lock = Box::new(AtomicU32::new(UNLOCKED));
         Self { val, lock }
     }
 
@@ -67,7 +73,7 @@ impl<T> Futer<T> {
         loop {
             match self
                 .lock
-                .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Acquire)
+                .compare_exchange_weak(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire)
             {
                 Ok(_) => {
                     break Ok(FuterGuard::new(
@@ -83,7 +89,7 @@ impl<T> Futer<T> {
     }
 
     pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
-        match self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Acquire) {
+        match self.lock.compare_exchange_weak(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire) {
             Ok(_) =>
                 Ok(FuterGuard::new(
                     self.val.as_ref() as *const T,
