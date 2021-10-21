@@ -261,7 +261,8 @@ mod tests {
         use std::sync::{Arc, Barrier};
         use std::thread::spawn;
 
-        const NUM_THREADS: usize = 1000;
+        const NUM_THREADS: usize = 5;
+        const NUM_ITER: usize = 1000;
 
         for _ in 0..1 {
             let barrier = Arc::new(Barrier::new(NUM_THREADS));
@@ -274,15 +275,17 @@ mod tests {
                 let finished_barrier_clone = Arc::clone(&finished_barrier);
                 spawn(move || {
                     barrier_clone.wait();
-                    let mut lock = futer_clone.lock().unwrap();
-                    *lock = *lock + 1;
-                    Futer::unlock(lock);
+                    for _ in 0..NUM_ITER {
+                        let mut lock = futer_clone.lock().unwrap();
+                        *lock = *lock + 1;
+                        Futer::unlock(lock);
+                    }
                     finished_barrier_clone.wait();
                 });
             }
 
             finished_barrier.wait();
-            assert_eq!(*futer.lock().unwrap(), NUM_THREADS);
+            assert_eq!(*futer.lock().unwrap(), NUM_THREADS * NUM_ITER);
         }
     }
 
