@@ -137,18 +137,22 @@ impl<T, F: Futex> FuterInternal<T, F> {
 pub struct Futer<T>(FuterInternal<T, RealFutexCalls>);
 
 impl<T> Futer<T> {
+    #[inline]
     pub fn new(val: T) -> Self {
         Futer(FuterInternal::new(val))
     }
 
+    #[inline]
     pub fn lock(&self) -> Result<FuterGuard<T>, ()> {
         self.0.lock().map(|guard| FuterGuard(guard))
     }
 
+    #[inline]
     pub fn try_lock(&self) -> Result<FuterGuard<T>, TryLockError> {
         self.0.try_lock().map(|guard| FuterGuard(guard))
     }
 
+    #[inline]
     pub fn unlock(guard: FuterGuard<T>) {
         FuterInternal::unlock(guard.0)
     }
@@ -160,12 +164,14 @@ pub struct FuterGuard<'a, T>(FuterGuardInternal<'a, T, RealFutexCalls>);
 impl<'a, T> std::ops::Deref for FuterGuard<'a, T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &*self.0
     }
 }
 
 impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.0
     }
