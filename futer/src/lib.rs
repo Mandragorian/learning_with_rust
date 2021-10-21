@@ -26,6 +26,7 @@ impl Futex for RealFutexCalls {
 
 const UNLOCKED: u32 = 0;
 const LOCKED: u32 = 1;
+const CONTESTED: u32 = 2;
 
 #[derive(Debug)]
 struct FuterGuardInternal<'a, T, F: Futex> {
@@ -64,8 +65,10 @@ impl<'a, T, F: Futex> std::ops::DerefMut for FuterGuardInternal<'a, T, F> {
 // Safety: T is never accessed in drop, so it is safe to let it dangle
 unsafe impl<'a, #[may_dangle] T, #[may_dangle] F: Futex> Drop for FuterGuardInternal<'a, T, F> {
     fn drop(&mut self) {
-        self.lock.store(UNLOCKED, std::sync::atomic::Ordering::Release);
-        F::futex_wake(self.lock, u32::MAX, None);
+        if self.lock.fetch_sub(1, Ordering::Release) != 1 {
+            self.lock.store(0, Ordering::Release);
+            F::futex_wake(self.lock, u32::MAX, None);
+        }
     }
 }
 
@@ -88,23 +91,31 @@ impl<T, F: Futex> FuterInternal<T, F> {
     }
 
     fn lock(&self) -> Result<FuterGuardInternal<T, F>, ()> {
-
-        loop {
-            match self
-                .lock
-                .compare_exchange_weak(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire)
-            {
+        match self
+            .lock
+            .compare_exchange(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Acquire) {
                 Ok(_) => {
-                    break Ok(FuterGuardInternal::new(
+                    return Ok(FuterGuardInternal::new(
                         self.val.as_ref() as *const T,
                         self.lock.as_ref(),
                     ))
                 }
-                Err(_) => {
-                    F::futex_wait(&self.lock, 1, None);
+                Err(val) => {
+                    let mut c = val;
+                    loop {
+                        if (c == 2) || (self.lock.compare_exchange(LOCKED, CONTESTED, Ordering::Acquire, Ordering::Acquire) == Err(2))  {
+                            F::futex_wait(&self.lock, CONTESTED, None);
+                        }
+                        c = match self.lock.compare_exchange(UNLOCKED, CONTESTED, Ordering::Acquire, Ordering::Acquire) {
+                            Ok(_) => break Ok(FuterGuardInternal::new(
+                                    self.val.as_ref() as *const T,
+                                    self.lock.as_ref(),
+                                )),
+                            Err(val) => val,
+                        }
+                    }
                 }
             }
-        }
     }
 
     fn try_lock(&self) -> Result<FuterGuardInternal<T, F>, TryLockError> {
@@ -163,6 +174,22 @@ impl<'a, T> std::ops::DerefMut for FuterGuard<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static FUTEX_WAKE_CALL_COUNTER: AtomicU32 = AtomicU32::new(0);
+    static FUTEX_WAIT_CALL_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    struct MockFutexCalls;
+
+    impl Futex for MockFutexCalls {
+        fn futex_wake(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
+            FUTEX_WAKE_CALL_COUNTER.fetch_add(1, Ordering::SeqCst);
+            futex_wake(lock, val, timeout)
+        }
+        fn futex_wait(lock: &AtomicU32, val: u32, timeout: Option<FutexTimeout>) -> i64 {
+            FUTEX_WAIT_CALL_COUNTER.fetch_add(1, Ordering::SeqCst);
+            futex_wait(lock, val, timeout)
+        }
+    }
 
     #[test]
     fn futer_can_be_correctly_constructed() {
@@ -281,5 +308,16 @@ mod tests {
                 panic!("try_lock did not return error");
             }
         }
+    }
+
+    #[test]
+    fn only_syscalls_when_contested() {
+        let futer_internal = FuterInternal::<u32, MockFutexCalls>::new(0);
+
+        let lock = futer_internal.lock().unwrap();
+        FuterInternal::unlock(lock);
+
+        assert_eq!(FUTEX_WAIT_CALL_COUNTER.load(Ordering::SeqCst), 0);
+        assert_eq!(FUTEX_WAKE_CALL_COUNTER.load(Ordering::SeqCst), 0);
     }
 }
